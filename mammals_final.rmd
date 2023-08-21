@@ -1,0 +1,744 @@
+---
+title: "Mammalian Sleep and Longevity: An Analysis of the mammalsleep Data Set"
+author: Mariska Batavia, Jack Donohue, and Rowdy Dudley
+output: pdf_document
+---
+## Executive Summary ##
+
+Daily sleep duration and longevity are important aspects of mammalian biology, and are factors that affect, and are affected by, many other physiological, life history, and ecological traits. Both daily sleep duration and longevity may be hard to accurately measure in practice, due to the logistical constraints inherent in capturing, housing, and/or monitoring rare or non-domesticated species. In this project we sought to model these traits as a function of other, potentially more easily measurable features of species.
+
+Our data for this project came from the mammalsleep data set from the Faraway package in R. This dataset contains data on 62 species of mammals, and includes measures of brain and body mass, lifespan, gestation, daily sleep duration, and three categorical indicies (predation, exposure, and danger indices) that capture various aspects of a species' behavioral ecology. We sought to build models that could predict daily sleep duration and odds of being longliving as accurately as possible, and also wanted to understand the relationship between these outcomes and various predictor variables. 
+
+Over the course of the project, we built three models. The first model used multiple linear regression to model daily sleep duration, treating the three categorical indices as additional quantitative variables in the model, rather than as categories. The second model used multiple linear regression to model daily sleep duration, but unlike the first approach, treated the three categorical indices as categorical variables. This second approach generated a better model than the first approach. Our third model used logistic regression to model the odds of being longliving (defined as the top 25% of lifespans). 
+
+## Data Description and Methods ##
+
+The data source for this project was the mammalsleep dataset from the Faraway package in R. This set included data from 62 species of mammals. Several quantitative variables were available, including brain mass (g),  body mass (kg), daily sleep duration (hours), length of  gestation (days), and lifespan (years). The dataset also included three categorical variables - each a five-point scale - that characterized species’ risk of predation (predation index), exposure during sleep periods (exposure index), and overall level of danger from other animals (danger index). 
+
+We performed several manipulations on our data. First, both brain and body mass show a very wide range of values, with the majority of species clustered at the low end of the range. To pull in the extreme values, we added log(body mass) and log(brain mass) to the dataset, and used these in some analyses. Second, all three indices (predation, exposure, and danger), were initially coded as integers; during model building we experimented with these variables by either treating them as quantitative or by converting them to factors and treating them as categorical. Third, the original dataset included lifespan as a quantitative variable; to make this a binary outcome suitable for a logistic regression analysis, we categorized species with lifespan in the 4th quartile (>28 years) as long-living, and species with lifespans shorter than this threshold as not long-living. Finally, we removed points with missing values as needed to perform analyses.
+
+
+## Exploratory Data Analysis ##
+
+```{r, include=FALSE}
+# Load libraries and data -------------------------------------------------
+
+library(tidyverse)
+library(faraway)
+library(gridExtra)
+
+mammalsEDA <- mammalsleep
+
+```
+
+```{r, include=FALSE}
+# Long-living (top 25%); yes or no
+summary(mammalsEDA$lifespan) #3rd quartile is 27.75 years
+
+longliving <- ifelse(mammalsEDA$lifespan>28, "yes", "no")
+
+#log body mass to pull in the extreme range of values
+logbody <- log(mammalsEDA$body)
+
+#log brain mass to pull in the extreme range of values
+logbrain <- log(mammalsEDA$brain)
+
+#add to the data frame
+mammalsEDA <- data.frame(mammalsEDA, longliving, logbody, logbrain)
+```
+
+```{r, include=FALSE}
+# Change variables to factors ---------------------------------------------
+
+mammalsEDA$predation <- factor(mammalsEDA$predation)
+
+mammalsEDA$exposure <- factor(mammalsEDA$exposure)
+
+mammalsEDA$danger <- factor(mammalsEDA$danger)
+```
+
+To explore the relationship between daily sleep duration and candidate predictors, we used the pairs function to plot a matrix of scatterplots (Figure 1, below). Note that we used log of body mass and brain mass, as described above, due to the very wide range of values for mass and the consequent difficulty in visualizing relationships to other variables. We also included the predation, exposure, and danger indices in this matrix; even though these variables are fundamentally categorical, we wanted to explore the possibility of treating them as quantitative, since they are each on a scale of 1-5. 
+
+```{r, echo=FALSE, warning=FALSE}
+# pairs plot with quantitative variables
+
+pairs(mammalsEDA[c(5:10,12:13)], lower.panel = NULL, main = "Figure 1: Pairs Plot of Potential Predictors")
+```
+
+In addition to showing that sleep is related to all the quantitative predictors, this matrix shows that many of the variables are positively correlated to each other, and we took this into account when we built our models.
+
+We also explored how the three categorical variables were related to daily sleep duration (Figure 2, below).  
+
+```{r, echo=FALSE, warning=FALSE}
+# boxplots of sleep versus the three indices
+plot1 <- ggplot(mammalsEDA, aes(x=predation, y=sleep))+
+  geom_boxplot()+
+  labs(x="Predation Index", y="Daily Sleep (Hours)")
+
+plot2 <- ggplot(mammalsEDA, aes(x=exposure, y=sleep))+
+  geom_boxplot()+
+  labs(x="Exposure Index", y="Daily Sleep (Hours)")
+
+plot3 <- ggplot(mammalsEDA, aes(x=danger, y=sleep))+
+  geom_boxplot()+
+  labs(x="Danger Index", y="Daily Sleep (Hours)")
+
+grid.arrange(plot1, plot2, plot3, ncol=3, top="Figure 2: Categorical Predictors Versus Hours of Daily Sleep")
+
+```
+
+Vulnerability to predation, exposure during sleep, and overall danger from other animals seemed like variables that might logically have some relationship to sleeping patterns. From an initial analysis we can see that, despite considerable overlap between levels, the animals that get the most sleep per day generally have lower predation and exposure indices. Animals with the lowest danger index level tend to sleep more hours. This makes sense, as the safest animals will naturally be able to sleep longer hours.
+
+To explore longevity (likelihood of being in the top quartile for lifespan) versus potential quantitative predictors, we created boxplots to examine the distribution of predictor values between long-living species and those that are not long-living (Figure 3, below). 
+
+```{r, echo=FALSE, warning=FALSE}
+#boxplots of quantitative predictors versus longevity
+
+#longliving by log body mass
+plot4 <- mammalsEDA%>%
+  drop_na(longliving)%>%
+  ggplot(aes(x=longliving, y=logbody))+
+  geom_boxplot()+
+  labs(x="Longliving?", y="Log Body Mass (kg)")
+
+#longliving by log brain mass
+plot5 <- mammalsEDA%>%
+  drop_na(longliving)%>%
+  ggplot(aes(x=longliving, y=logbrain))+
+  geom_boxplot()+
+  labs(x="Longliving?", y="Log Brain Mass (g)")
+
+plot6 <- mammalsEDA%>%
+  drop_na(longliving)%>%
+  ggplot(aes(x=longliving, y=sleep))+
+  geom_boxplot()+
+  labs(x="Longliving?", y="Daily Sleep (Hours)")
+
+plot7 <- mammalsEDA%>%
+  drop_na(longliving)%>%
+  ggplot(aes(x=longliving, y=gestation))+
+  geom_boxplot()+
+  labs(x="Longliving?", y="Gestation (Days)")
+
+grid.arrange(plot4, plot5, plot6, plot7, nrow=2,ncol=2, top="Figure 3: Distribution of Quantitative Predictors by Longevity")
+
+```
+
+From this figure, we can see that long-living species have higher log body and log brain mass, shorter daily sleep duration, and longer gestation periods. Since we knew from Figure 1 that many of these predictors are correlated to each other, we took this into account when building models of longevity.
+
+Finally, to explore longevity (likelihood of being in the top quartile of lifespan) versus potential categorical predictors, we created stacked bar charts to compare proportions of each index level for long-living versus non-long-living species (Figure 4, below). 
+
+```{r, echo=FALSE, warning=FALSE}
+#stacked bar charts of categorical variables versus longevity
+
+#Longliving by predation
+plot8 <- mammalsEDA%>%
+  drop_na(longliving)%>%
+  ggplot(aes(x=longliving, fill=predation))+
+  geom_bar(position="fill")+
+  labs(x="Longliving?", y="Proportion")
+
+#Longliving by exposure
+plot9 <- mammalsEDA%>%
+  drop_na(longliving)%>%
+  ggplot(aes(x=longliving, fill=exposure))+
+  geom_bar(position="fill")+
+  labs(x="Longliving?", y="Proportion")
+
+#Longliving by danger
+plot10 <- mammalsEDA%>%
+  drop_na(longliving)%>%
+  ggplot(aes(x=longliving, fill=danger))+
+  geom_bar(position="fill")+
+  labs(x="Longliving?", y="Proportion")
+
+grid.arrange(plot8, plot9, plot10,ncol=3, top="Figure 4: Distribution of Index Levels by Longevity")
+```
+
+On the danger index, we can see that long-living species are more likely to be in extreme levels (1=least danger, 5=most danger) than non-long-living species. Exposure index is markedly different between long-living and non-long-living species, with long-living species proportionally much more exposed; we suspect this may be partially attributable to the generally larger body mass of long-living species, and the relative scarcity of well protected sleeping places for large animals. Lastly, long-living species are at lower risk of predation as compared to their non-long-living counterparts, though most of the differences between long-living species and non-long-living-species were in low risk predation levels. As such, we considered predation to be less robustly related to longevity than the other two indicies.
+
+## Model 1: Daily Sleep Duration in Mammals with Quantitative Predictors ##
+
+Our first objective was to identify a model that predicts how much a mammal sleeps based on multiple predictors, requiring us to perform a multiple linear regression. Our data involved both quantitative and categorical predictors, so we decided to run multiple models to determine if it was better to treat the categorical predictors as categorical, or if it worked better to treat them as quantitative. Initially we decided to try a model with the categorical predictors treated as quantitative variables.
+
+```{r, echo=FALSE, warning=FALSE}
+library("faraway")
+library("tidyverse")
+library("leaps")
+library("MASS")
+data <- mammalsleep
+
+LogBody <- log(data$body)
+
+LogBrain <- log(data$brain)
+
+data <- data.frame(data, LogBody, LogBrain)
+
+data <- data %>%
+  dplyr::select(LogBody, LogBrain, lifespan, gestation, danger, predation, exposure, sleep) %>%
+  na.omit(data)
+
+result <- lm(sleep~LogBody+lifespan+gestation+danger+LogBrain+predation+exposure, data = data)
+summary(result)
+
+yhat5 <- result$fitted.values
+res5 <- result$residuals
+data <- data.frame(data,yhat5,res5)
+
+ggplot(data, aes(x=yhat5, y=res5))+
+  geom_point()+
+  geom_hline(yintercept = 0, color = "red")+
+  labs(x = "Fitted y",
+       y = "Residuals",
+       title = "Figure 5: Residual Plot")
+```
+
+On an initial look at the pairs function in (figure above) we can see that the categorical predictors do not take on a linear shape and look atypical when compared to the other quantitative predictors, indicating that treating them as categorical predictors is likely the better option for our model. 
+
+The initial residual plot of the model indicated that assumption one was likely met, with what looks to be an even distribution of points on either side of the line, but assumption two looks not to be met, with large differences in the variation of space between points.
+
+Based on the summary of the model many of the predictors look to be insignificant based on the p-values. This indicated that we should run a partial F test on those predictors with high p-values to determine if we can drop them all from the model. This would hopefully improve our model's predictive ability.
+
+```{r, echo=FALSE, warning=FALSE}
+reduced <- lm(sleep~danger+gestation+predation, data = data)
+
+anova(reduced, result)
+# F stat of 1.465 and p-value of 0.2295, meaning we reject the null and go with the full model. 
+
+anova(result)
+
+F0 <- (((77.65+224.38+28.43)/(3))/((328.84)/(43)))
+F0
+# 14.40395
+
+1-pf(F0,3,43) #p-value
+# 1.231251e-06
+
+qf(0.95,3,43) #critical value
+# 2.821628
+```
+
+Our partial F test (see equations above) indicated that we could use the reduced model, with only danger, gestation, and predation as predictors. To be sure about which predictors we should keep and which we should drop we performed a forward selection to determine which predictors would result in the lowest AIC value for our model, hopefully indicating which predictors we can drop from the model. 
+
+```{r, echo=FALSE, warning=FALSE}
+regnull <- lm(sleep~1, data=data)
+regfull <- lm(sleep~LogBody+lifespan+gestation+danger+LogBrain+predation+exposure, data = data)
+
+step(regnull, scope = list(lower=regnull, upper=regfull), direction = "forward")
+
+result.final <- lm(formula = sleep ~ exposure + gestation + danger + predation + LogBrain, data = data) #AIC = 107.34
+summary(result.final)
+```
+
+The forward selection (see summary above) indicated that we should only include 5 of our 7 predictors. With this information we then conducted a VIF test to determine which of the predictors the forward selection chose could be dropped due to multicolinearity among the remaining predictors. 
+
+```{r, echo=FALSE, warning=FALSE}
+cor(data[,c(1:7)])
+
+vif(result.final)
+```
+
+We found that 3 of our 5 predictors had a high VIF score (see output above), meaning they were found to be colinear, allowing us to drop them from the model as well, leaving us with 2 predictors for our final model. 
+
+```{r, echo=FALSE, warning=FALSE}
+result.latest <- lm(formula = sleep ~ gestation + LogBrain, data = data)
+summary(result.latest)
+
+```
+
+After viewing the summary of our newest model this left us with 2 predictors of significance and an R2 value of .44. We then ran our residual plot (see chart below) again to determine if our regression assumptions had been met.
+
+```{r, echo=FALSE, warning=FALSE}
+yhat7 <- result.latest$fitted.values
+res7 <- result.latest$residuals
+data <- data.frame(data,yhat7,res7)
+
+ggplot(data, aes(x=yhat7, y=res7))+
+  geom_point()+
+  geom_hline(yintercept = 0, color = "red")+
+  labs(x = "Fitted y",
+       y = "Residuals",
+       title = "Figure 6: Residual Plot")
+```
+
+This plot looks better, but the variance among points still seems to be off. This drove us to then transform the y variable in order to constrain the variance among points. Initially we produced an boxcox plot (see chart below) to determine the best adjustment to make in terms of transformation of the y variable.
+
+```{r, echo=FALSE, warning=FALSE}
+boxcox(result.latest)
+```
+
+Since the value 0 was not included in our range within the boxcox plot (see chart above) we determined the best transformation procedure would be to raise the y to 0.5 and apply that to our predictors and see if it impacts our plot.
+
+```{r, echo=FALSE, warning=FALSE}
+ystar <- (data$sleep)^0.5
+data <- data.frame(data,ystar)
+result.ystar <- lm(ystar~gestation + LogBrain, data = data)
+
+yhat2 <- result.ystar$fitted.values
+res2 <- result.ystar$residuals
+data <- data.frame(data,yhat2,res2)
+
+ggplot(data, aes(x=yhat2,y=res2))+
+  geom_point()+
+  geom_hline(yintercept = 0,color="red")+
+  labs(x="fitted y")
+
+acf(res2, main="Figure 7: ACF Plot of Residuals with ystar")
+
+qqnorm(res2)
+qqline(res2, col="red")
+```
+
+The transformation of y had little impact on the variance issues (see chart above) we were seeing in our previous residual plot, but improved the R^2 value of the model to .57. We then performed an ACF plot (see ACF chart above) and a QQ plot (see QQ plot above) to determine if our model was within tolerance.
+
+```{r}
+summary(result.ystar)
+```
+
+Our final model was sleep^0.5~gestation + Logbrain, which equates to y = 3.9673871 - 0.0019734(x1) - 0.2287189(x2). Our model indicates that as a mammal's gestation and brain size increase, the total amount they sleep is reduced.
+
+
+## Model 2: Daily Sleep Duration in Mammals with Quantitative and Categorical Predictors ##
+
+```{r, include = FALSE}
+library(tidyverse)
+library(MASS)
+library(leaps)
+library(dplyr)
+data = mammalsleep
+rownames(data) <- data$Animal
+
+```
+
+
+
+```{r, include = FALSE}
+# Change categorical variables to factors
+
+data$predation = factor(data$predation)
+data$exposure=factor(data$exposure)
+data$danger=factor(data$danger)
+
+```
+
+```{r, include = FALSE}
+drop = c('exposure','predation','Animal','dream','nondream') # Drop columns that are not of interest
+
+data2=data[!(names(data) %in% drop)]
+
+data2=data2 %>% 
+  drop_na()                                                  # Drop NA rows
+
+
+# Convert numeric variables through log transformation because of high variation among observations
+
+data2$log.brain=log(data2$brain)
+data2$log.body = log(data2$body)
+data2$log.gestation = log(data2$gestation)
+
+```
+
+
+```{r, include = FALSE}
+
+# Drop original numeric variables
+
+drop2 = c('brain','body','gestation')
+data2=data2[!(names(data2) %in% drop2)]
+
+
+```
+
+The second multiple linear regression model treats the appropriate variables as categorical rather than quantitative. The initial approach began with ensuring R could read the variables correctly, by transforming them into factor variables. Following this, we dropped variables that were not of interest. The two main variables of non-interest are dream and nondream, as they are derivatives of the dependent variable sleep, and are highly correlated. We also dropped predation and exposure for similar reasons, as the danger index is based off of a combination of predation, exposure, and other information. Animal was also dropped, as that variable is simply a name identifying what specific animal the observation is referring to. This left us with the variables,  sleep (y), lifespan, danger, brain, body and gestation. As mentioned previously we log transformed brain and body mass before our analysis, in order to pull in extreme values, and aide in determining linear relationships between the variables in the data set through visual inspection. These log transformed variables were kept and their corresponding original columns were dropped.
+
+
+
+```{r, include= FALSE}
+# Check for linear relationships visually
+
+pairs(data2,lower.panel = NULL)
+
+```
+
+Through visual inspection of Figure 1 (above), we found that there are linear relationships between the variables of interest. So we took our next steps in order to identify an appropriate regression model. This began with running all possible regressions, and evaluating the models that the search procedure suggested. In order to cast a wide net, and make the most informed decision in relation to model selection, we also ran other automatic search procedures. For instance, we ran a backward selection procedure using the intercept only model and the full model. This process gave us the model that we finally decided on, $lm(sleep ~ danger + log.brain + log.gestation)$. The output of these processes is below:
+
+
+```{r, echo = FALSE}
+# automatic search algorithms
+
+# all possible regressions 
+
+all =  regsubsets(sleep ~., data=data2, nbest=1,really.big = T)
+summary(all)
+
+# what can be extracted
+
+names(summary(all))
+
+
+```
+
+
+```{r, echo = FALSE}
+# find best model in terms of adj R2 , Cp, BIC
+
+which.max(summary(all)$rsq)
+which.min(summary(all)$cp)
+which.min(summary(all)$bic)
+```
+
+
+```{r, echo = FALSE}
+
+# Intercept Only
+
+intercept = lm(sleep~1, data=data2)
+
+# Full Model
+
+Full = lm(sleep~., data=data2)
+
+
+
+# Backward Elimination
+
+step(Full, scope=list(lower=intercept, upper=Full), direction="backward") # error
+
+
+
+```
+
+
+```{r, echo = FALSE}
+# Fit first model base don inspection of linear relationships in pairs output and auto algo
+
+model = lm(sleep ~ danger + log.brain + log.gestation,data=data2)
+summary(model)
+
+```
+
+We fit the initial model which had an $R^2$ of 0.71 and $adj(R^2)$ of 0.67. In order to asses the regression assumptions we displayed a residual plot (below). The mean variance assumption seemed to be met quite nicely, however, the constant variance assumption was not met. This can be seen by the pattern in the residual cloud, as the fitted Y gets larger, the cloud fans out into a con-like shape.
+
+```{r, echo=FALSE}
+# Residual plot
+
+resid = data.frame(Y=model$fitted.values,Residuals=model$residuals)   #### Cant add to original data frame because it doesn't have equal length? ###
+
+
+
+ggplot(resid, aes(x=Y,y=Residuals))+
+  geom_point()+
+  geom_hline(yintercept=0, color=" red")+
+  labs(x="Fitted y", y="Residuals", title="Residual Plot")
+
+
+```
+
+To assess whether or not transformations should be made on the variables, we plotted box cox, ACF, and QQ plots (below). The Normal QQ plot indicated that the data was generally normally distributed, except for the tail ends of the data points which seemed to curve away from the plot line. This could potentially be an indication of a necessary transformation. The Box Cox plot indicated that a log transformation may be appropriate for the dependent variable. This makes some sense in relation to the fact that other variables in the data set have already been log transformed. the ACF plot also indicated that auto-correlation may be present in the data.
+
+
+```{r, echo = FALSE}
+# ACF, boxcox, QQ Plots
+boxcox(model)
+acf(resid$Residuals)
+qqnorm(resid$Residuals)
+qqline(resid$Residuals, col="red")
+```
+
+
+```{r, echo = FALSE}
+# Transform Y
+
+data2$new.sleep = log(data2$sleep)
+
+```
+
+After log transforming the dependent variable, we can see in the output below that the $R^2$ has improved to  0.79 and the $adj(R^2)$ has improved to .76.
+
+```{r, echo = FALSE}
+new.model = lm(new.sleep~danger+log.brain+log.gestation,data=data2)
+summary(new.model)
+```
+
+```{r, echo = FALSE}
+resid$new.Y=new.model$fitted.values
+resid$new.Residuals = new.model$residuals
+```
+
+
+The constant variance assumption also seems to be met based on the residual plot (below), however, the mean variance = 0 assumption is questionable because of an imbalance of negative residuals for the low fitted y values. 
+
+```{r, echo = FALSE}
+# Residual plot for log(y)
+
+ggplot(resid, aes(x=new.Y,y=new.Residuals))+
+  geom_point()+
+  geom_hline(yintercept=0, color=" red")+
+  labs(x="Fitted y", y="Residuals", title="Residual Plot")
+
+
+```
+
+The new boxcox plot implies that no more transformations on the dependent variable are necessary. The ACF plot was improved and only indicates auto-correlation at one lag point rather than multiple. Finally, the normal QQ plot seems unchanged. It indicates that the data is generally normally distributed, except at the tails. These plots are below. 
+
+
+```{r, echo = FALSE}
+# ACF, boxcox, QQ Plots
+boxcox(new.model)
+acf(resid$new.Residuals)
+qqnorm(resid$new.Residuals)
+qqline(resid$new.Residuals, col="red")
+```
+
+ 
+  
+
+Finally, we checked the variance inflation factors of the independent variables, and no multicollinearity was present based on a threshold of five.
+
+```{r, echo = FALSE}
+
+# Check Inflation Factors (VIF)
+
+library(faraway)            # cutoff = 5 
+vif(model)
+
+
+```
+
+
+The next step we took, after confirming that our regression model was on the right track, was to check for interaction between the independent variables. Based on the scatter plots below, we can see that there are no signs of interaction between sleep and brain (by Danger Index), however there seemed as if there could be interaction between sleep and gestation (by Danger Index). The plot shows that the regression lines for danger 4 an 2 intersect, indicating that an interaction term may be necessary. An interesting note about these graphs is that they indicate that animals with the highest Danger Index, coupled with the highest gestation time get the least amount of sleep per day. 
+
+```{r, echo = FALSE}
+data2 = data.frame(c(data2,resid))
+
+ggplot(data2, aes(x=log.gestation,y=new.Y, color=danger))+
+geom_point()+
+geom_smooth(method=lm, se=FALSE)+
+labs(x="log(gestation)",
+y="log(sleep)",
+title="Hours Slept Per Day by Gestation and Danger Index")
+
+
+
+ggplot(data2, aes(x=log.brain,y=new.Y, color=danger))+
+geom_point()+
+geom_smooth(method=lm, se=FALSE)+
+labs(x="log(gestation)",
+y="log(sleep)",
+title="Hours Slept Per Day by Brain Weight and Danger Index")
+
+
+```
+
+ 
+After seeing that there may be interaction between the independent variables, we fit a new regression model to include the interaction terms:
+
+```{r, echo = FALSE}
+# Regression with interaction
+
+
+contrasts(data2$danger)                         # should we check interaction with every other variable too, and add interaction term to all of them?
+
+
+regression.interaction = lm(sleep~log.brain*danger+log.gestation*danger, data=data2)
+summary(regression.interaction) # Model probably over fit with interaction terms
+```
+
+This model had a lower $R^2$ and the $adj(R^2)$ seemed to indicate over fitting, as it was approximately 0.1 lower. We conducted a hypothesis test in order to check if the interaction terms were significant. By writing a function that would perform the appropriate arithmetic and return the p-value associated with a hypothesis test for interaction terms.
+
+
+
+$$
+H_0\text{: }\beta_7=\beta_8=\beta_{9}=\beta_{10}=\beta_{11}=\beta_{12}=\beta_{13}=\beta_{14}=0
+$$
+$$
+H_a \text{: Not all Coefficients in Null = 0}
+$$ 
+
+```{r, echo = FALSE}
+anova.interaction = anova(regression.interaction)
+anova.interaction
+names(anova.interaction)
+```
+
+
+```{r, echo = FALSE}
+anova.interaction$`Sum Sq`
+```
+
+
+```{r, echo = FALSE}
+# get p-values of interaction terms
+
+interaction = function(x){
+  ss= anova.interaction$`Sum Sq`[4]
+  df = anova.interaction$Df[4]
+  msres=anova.interaction$`Mean Sq`[6]
+  df.res = anova.interaction$Df[6]
+  ms = ss/df
+  f=ms/msres
+  p=pf(f,df,df.res)
+  return(p)
+}
+
+interaction(anova.interaction)  
+
+
+interaction2 = function(x){
+  ss= anova.interaction$`Sum Sq`[5]
+  df = anova.interaction$Df[5]
+  msres=anova.interaction$`Mean Sq`[6]
+  df.res = anova.interaction$Df[6]
+  ms = ss/df
+  f=ms/msres
+  p=pf(f,df,df.res)
+  return(p)
+}
+
+interaction2(anova.interaction)                          # p value is insignificant, we can drop interaction terms from the model
+```
+
+
+Both of the p-values that were returned were insignificant, indicated that the interaction terms could be dropped from the model and that we should favor the reduced, first order additive model over the model with interaction terms. In order to see which model may be better at predicting on new data, we use dour function that returns a PRESS statistic for a regression model. Our model had, by far, the lowest PRESS statistic. This indicated that it would most ;likely perform better when predicting on new data compared to the other two models.
+
+```{r, echo = FALSE}
+# Create PRESS function
+
+# Function takes in a regression model saved to a variable and returns PRESS statistic
+
+press_func = function(regression) {
+  res = resid(regression)
+  hat = lm.influence(regression)$hat
+  matrix = (res/(1-hat))
+  press = sum(matrix**2)
+  return(press)
+}
+
+
+# Example use of the function above
+press_func(model)
+press_func(new.model)                   # new model with transformed Y has lowest PRESS, so will perform better on predictions
+press_func(regression.interaction)
+
+
+```
+
+
+Overall, we found that "new.model" seemed to be the strongest model when treating danger as a categorical variable rather than a quantitative variable. We had a relatively strong $R^2$ of 0.79, and the $adj(R^2)$ did not seem to indicate over fitting. The regression assumptions seemed to be met well, except for variance mean= 0 which was harder to judge because of the skewed values at the lower end of fitted y values. Our diagnostics indicated transformations were needed, and after they were performed our model improved and seemed to indicate good model fit. 
+
+
+## Model 3: Longevity in Mammals ##
+
+Our second objective was to identify a model that predicts and explains the odds of being a long-living species. To do this, we split the original dataset into training (75%) and testing (25%) sets, and used the training set for all model-building. 
+
+```{r, include = FALSE}
+# Load libraries and data -------------------------------------------------
+
+library(tidyverse)
+library(faraway)
+library(ROCR)
+
+mammals <- mammalsleep
+
+# Add variables -----------------------------------------------------------
+
+# Long-living; yes or no
+
+longliving <- ifelse(mammals$lifespan>28, "yes", "no") #cutoff is the 3rd quartile
+
+longliving <- factor(longliving)
+
+#log body mass to pull in the extreme range of values
+logbody <- log(mammals$body)
+
+#log brain mass to pull in the extreme range of values
+logbrain <- log(mammals$brain)
+
+#add to the data frame
+mammals <- data.frame(mammals, longliving, logbody, logbrain)
+
+# Split into training and testing set -------------------------------------
+
+set.seed(1) ##for reproducibility to get the same split
+sample<-sample.int(nrow(mammals), floor(.75*nrow(mammals)), replace = F) #75% for training
+train<-mammals[sample, ] ##training data frame
+test<-mammals[-sample, ] ##test data frame
+```
+
+Knowing that many of the quantitative predictors were strongly correlated to each other, our first step was to narrow down the list of candidate quantitative predictors. We started with a model for longevity that included all four quantitative predictors: log(body), log(brain), sleep, and gestation. The output of this model is shown below. 
+
+```{r, echo=FALSE}
+# Model 1 (quant only) ----------------------------------------------------
+#log body, log brain, sleep, gestation
+
+mod1 <- glm(longliving ~ logbody + logbrain + sleep + gestation, family="binomial", data=train)
+summary(mod1)
+```
+We calculated a $\Delta{G^2}$ statistic to test the hypothesis the the model was better than an intercept only model. The null hypothesis was that all coefficients in the model equaled 0, and the alternative hypothesis was that at least one coefficient was not 0. We found $\Delta{G^2}$ = 44.40295 and P = 5.291002e-09; in other words, the model was significantly better at predicting longevity than an intercept only model. Yet, from the model output, we noted that none of the individual coefficients had a significant z-value, confirming our suspicion that multicollinearity among predictors was an issue we needed to address. We also noted the two warning messages, which seemed to indicate that this model perfectly classified species. We generated a confusion matrix using our training set to see if this was the case:
+
+```{r, echo = FALSE}
+#confusion matrix
+preds1 <- predict(mod1, newdata=train, type="response")
+table(train$longliving, preds1>0.5)
+```
+
+As suspected, this model perfectly classified species in the training set, which in turn made coefficient variances very high, and therefore it was difficult to relate predictors to the response. We also knew that multicollinearity was an issue, so we proceeded to test different combinations of these four quantitative predictors to see which could be eliminated from the model. A model of longevity as a function of log(body) and log(brain), for example, gave the following output:
+
+```{r, echo = FALSE}
+mod3 <- glm(longliving ~ logbody + logbrain, family="binomial", data=train)
+summary(mod3)
+```
+From this, we saw that, in the presence of log(brain), log(body) did not add anything to the model, given that its p-value was 0.6458. We proceeded to try a total of 8 models, combining different sets of quantitative predictors. Several showed the same warning messages that we got in our first model, and also showed the significant $\Delta{G^2}$ but insignificant individual predictors. In the end, we determined that the only quantitative predictor we needed to keep was log(brain). The output of this model is below:
+
+```{r, echo = FALSE}
+mod6 <- glm(longliving ~ logbrain, family="binomial", data=train)
+summary(mod6)
+```
+With quantitative variables narrowed down to just log(brain), we next considered whether to add any of the categorical variables (predation index, exposure index, or danger index) to the model. We also considered whether to add them as additional quantitative variables (since they were each on a scale of 1-5), or whether to add them as true categorical predictors. Since the danger index was based on the predation and exposure indices combined with other information, we first considered the addition of this index to the model. When danger index was treated as a quantitative variable, we got the following output:
+
+```{r, echo = FALSE}
+mod9 <- glm(longliving ~ logbrain + danger, family="binomial", data=train)
+summary(mod9)
+```
+
+When danger index was treated as a categorical predictor, we saw the following output:
+
+```{r, echo = FALSE}
+train$danger2 <- factor(train$danger)
+mod11 <- glm(longliving ~ logbrain + danger2, family="binomial", data=train)
+summary(mod11)
+```
+The outputs from both these models indicated that including the danger index did not significantly improve the model beyond just including log(brain), so we did not move forward with this predictor.
+
+Based on our exploratory data analysis, the index that seemed most clearly related to longevity was exposure index, so we tried this next. We used the same approach as with the danger index, first trying it as a quantitative variable and then as a categorical variable. Our output for these models was very similar to the outputs obtained when we added the danger index; neither showed a clear benefit of keeping the additional predictor.
+
+Our conclusion from analyzing all these models was that, due to the relationships among the different predictors, we only needed one of these variables to model longevity, and the best predictor was log(brain).The equation for this model (output shown previously) is:
+
+$$
+log(\frac{\pi}{1-\pi})= -11.7018 + 2.0994(x_1)
+$$
+where $\pi$ = the probability of being longliving and $x_1$= log(brain mass). This equation tells us that for a 10% increase in brain mass, the log odds of being longliving increase by a factor of 2.0994*log(1.1) = 0.2001. Thus, the odds of being longliving increase by a factor of exp(0.2001) = 1.22 for a 10% increase in brain mass. 
+
+We calculated a $\Delta{G^2}$ statistic to test the hypothesis that this model was useful. The null hypothesis was that $\beta_1$ = 0, and the alternative hypothesis was that $\beta_1$ was not 0. We found $\Delta{G^2}$ = 28.01163 and P = 1.205883e-07; in other words, the model was significantly better at predicting longevity than an intercept only model. We generated a confusion matrix with threshold set at 0.5 to test the predictive ability of this model on our test set, shown below:
+
+```{r, echo = FALSE}
+preds6 <- predict(mod6, newdata=test, type="response")
+table(test$longliving, preds6>0.5)
+```
+
+All predicted probabilities are essentially 0 or 1, so changing the threshold did not improve the overall accuracy. When we applied our first model to the test set, we obtained the following confusion matrix:
+
+```{r, echo=FALSE}
+
+#confusion matrix
+preds1_new <- predict(mod1, newdata=test, type="response")
+table(test$longliving, preds1_new>0.5)
+```
+
+This model - with all quantitative predictors - had a 0% false positive rate and a 50% false negative rate, but due to multicollinearity among predictors and the consequent high variances and wide confidence intervals of all the coefficients, our ability to infer relationships between the predictors and the response variable was limited. Our final model also has a 0% false positive rate, but it has a 67% false negative rate. We have thus sacrificed some classification ability with this reduced model, but we can relate log(brain mass) to odds of being longliving.
+
+## Conclusion ##
+
+Based on the conclusions drawn from the MLR treating categorical variables as quantitative, specifically none of the categorical predictors were maintained in the final model and the R^2 value was fairly low, we likely should not pursue a model treating categorical variables in this manner. This is further supported by the findings from the model where categorical variables were treated as categorical, where the R^2 value was significantly higher.  
+
+In modeling the odds of being longliving, we discovered that, while it was possible to build a model that perfectly classified the training set, this led to very high confidence intervals for coefficients and consequently, none of the coefficients were individually significant. If our goal were to predict the odds of being longliving as accurately as possible, we could use this model, however, it was difficult to relate different predictors to the odds of being longliving. A simpler model sacrificed some accuracy but allowed us to relate log(brain mass) to the odds of being longliving. 
